@@ -13,6 +13,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path      # ...\Dispel\RuFix142
 $game = Split-Path -Parent $root                              # ...\Dispel
 $dataDir = Join-Path $root 'data'
+$movieDir = Join-Path $root 'movies'
 $backupDir = Join-Path $root 'backup'
 $saveBackupDir = Join-Path $backupDir 'saves'
 $changesPath = Join-Path $root 'changes.json'
@@ -51,6 +52,16 @@ function Invoke-Backup {
   foreach ($sv in (Get-ChildItem $game -File | Where-Object { $_.Name -match '^\d+\.sav$|^Save\.ifo$|^game\.tmp$' })) {
     Copy-Item $sv.FullName (Join-Path $saveBackupDir $sv.Name)
     Log ('  бэкап сейва: {0}' -f $sv.Name)
+  }
+  if (Test-Path $movieDir) {
+    foreach ($mv in Get-ChildItem $movieDir -File) {
+      $orig = Join-Path $game ('Movie\' + $mv.Name)
+      if (Test-Path $orig) {
+        New-Item -ItemType Directory -Force (Join-Path $backupDir 'Movie') | Out-Null
+        Copy-Item $orig (Join-Path $backupDir ('Movie\' + $mv.Name))
+        Log ('  бэкап ролика: Movie\{0}' -f $mv.Name)
+      }
+    }
   }
 }
 
@@ -96,13 +107,20 @@ function Invoke-PatchSaves {
   if (-not $saves) { Log 'Файлы сохранений не найдены.' }
 }
 
-function Invoke-Apply([bool]$patchSaves) {
+function Invoke-Apply([bool]$patchSaves, [bool]$patchMovies) {
   if (Test-GameRunning) { Log 'ОШИБКА: закройте игру (Dispel.exe) и повторите.'; return }
   Invoke-Backup
   Log 'Копирую исправленные файлы...'
   foreach ($rel in Get-TargetFiles) {
     Copy-Item (Join-Path $dataDir $rel) (Join-Path $game $rel) -Force
     Log ('  установлен: {0}' -f $rel)
+  }
+  if ($patchMovies -and (Test-Path $movieDir)) {
+    Log 'Ставлю перекодированные видеоролики (MS Video 1 вместо Indeo)...'
+    foreach ($mv in Get-ChildItem $movieDir -File) {
+      Copy-Item $mv.FullName (Join-Path $game ('Movie\' + $mv.Name)) -Force
+      Log ('  установлен: Movie\{0}' -f $mv.Name)
+    }
   }
   if ($patchSaves) { Log 'Правлю сохранения...'; Invoke-PatchSaves }
   Log ''
@@ -123,11 +141,17 @@ function Invoke-Rollback([bool]$restoreSaves) {
       Log ('  восстановлен сейв: {0} (прогресс на момент бэкапа!)' -f $sv.Name)
     }
   }
+  if (Test-Path (Join-Path $backupDir 'Movie')) {
+    foreach ($mv in Get-ChildItem (Join-Path $backupDir 'Movie') -File) {
+      Copy-Item $mv.FullName (Join-Path $game ('Movie\' + $mv.Name)) -Force
+      Log ('  восстановлен ролик: Movie\{0}' -f $mv.Name)
+    }
+  }
   Log 'ОТКАТ ЗАВЕРШЁН.'
 }
 
 # ---------- режим командной строки ----------
-if ($Apply) { Invoke-Apply $true; exit }
+if ($Apply) { Invoke-Apply $true $true; exit }
 if ($Rollback) { Invoke-Rollback $true; exit }
 
 # ---------- GUI ----------
@@ -153,15 +177,22 @@ $chk.Location = New-Object System.Drawing.Point(15, 50)
 $chk.Size = New-Object System.Drawing.Size(600, 22)
 $form.Controls.Add($chk)
 
+$chkMov = New-Object System.Windows.Forms.CheckBox
+$chkMov.Text = 'Заменить видеоролики на совместимые (Windows 10/11 без кодеков Indeo)'
+$chkMov.Checked = $true
+$chkMov.Location = New-Object System.Drawing.Point(15, 74)
+$chkMov.Size = New-Object System.Drawing.Size(600, 22)
+$form.Controls.Add($chkMov)
+
 $btnApply = New-Object System.Windows.Forms.Button
 $btnApply.Text = 'ПРИМЕНИТЬ ПАТЧ'
-$btnApply.Location = New-Object System.Drawing.Point(15, 80)
+$btnApply.Location = New-Object System.Drawing.Point(15, 104)
 $btnApply.Size = New-Object System.Drawing.Size(290, 36)
 $form.Controls.Add($btnApply)
 
 $btnBack = New-Object System.Windows.Forms.Button
 $btnBack.Text = 'Откатить (вернуть оригинал)'
-$btnBack.Location = New-Object System.Drawing.Point(320, 80)
+$btnBack.Location = New-Object System.Drawing.Point(320, 104)
 $btnBack.Size = New-Object System.Drawing.Size(290, 36)
 $form.Controls.Add($btnBack)
 
@@ -169,14 +200,14 @@ $txt = New-Object System.Windows.Forms.TextBox
 $txt.Multiline = $true
 $txt.ReadOnly = $true
 $txt.ScrollBars = 'Vertical'
-$txt.Location = New-Object System.Drawing.Point(15, 128)
-$txt.Size = New-Object System.Drawing.Size(595, 300)
+$txt.Location = New-Object System.Drawing.Point(15, 152)
+$txt.Size = New-Object System.Drawing.Size(595, 276)
 $form.Controls.Add($txt)
 $script:LogSink = $txt
 
 $btnApply.Add_Click({
   $txt.Clear()
-  try { Invoke-Apply $chk.Checked } catch { Log ('ОШИБКА: ' + $_.Exception.Message) }
+  try { Invoke-Apply $chk.Checked $chkMov.Checked } catch { Log ('ОШИБКА: ' + $_.Exception.Message) }
 })
 $btnBack.Add_Click({
   $r = [System.Windows.Forms.MessageBox]::Show(
