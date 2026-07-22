@@ -8,7 +8,8 @@ param(
   [switch]$Rollback
 )
 $ErrorActionPreference = 'Stop'
-[System.Text.Encoding]::RegisterProvider([System.Text.CodePagesEncodingProvider]::Instance) 2>$null
+# в PowerShell 7 нужен провайдер кодовых страниц; в Windows PowerShell 5.1 его нет и он не нужен
+try { [System.Text.Encoding]::RegisterProvider([System.Text.CodePagesEncodingProvider]::Instance) } catch {}
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path      # ...\Dispel\RuFix142
 $game = Split-Path -Parent $root                              # ...\Dispel
